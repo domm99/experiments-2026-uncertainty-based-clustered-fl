@@ -1,7 +1,12 @@
 import torch
 from CustomDrawNodes import CustomDrawNodes
 from Device import device as device_program
-from learning import balanced_random_index_split, download_dataset, partition_dataset
+from learning import (
+    balanced_random_index_split,
+    create_target_rnd,
+    download_dataset,
+    partition_dataset,
+)
 from phyelds.simulator import Simulator
 from phyelds.simulator.deployments import deformed_lattice
 from phyelds.simulator.effects import DrawEdges, RenderConfig, RenderMode
@@ -20,8 +25,8 @@ def get_current_device():
             device = current_accelerator.type
     return device
 
-def initialize_target_rnd():
-    pass
+def initialize_target_rnd(dataset, random_seed: int, device: str):
+    return create_target_rnd(dataset, seed=random_seed, device=device)
 
 
 def run_simulation(dataset_name: str, number_of_areas: int, device: str, random_seed: int) -> None:
@@ -35,7 +40,7 @@ def run_simulation(dataset_name: str, number_of_areas: int, device: str, random_
     train_data, test_data = download_dataset(dataset_name)
     area_datasets = partition_dataset(train_data, number_of_areas, random_seed)
 
-    common_target_rnd = initialize_target_rnd() ## TODO implement this
+    common_target_rnd = initialize_target_rnd(train_data, random_seed, device)
 
     mapping = {} ### mapping node_id -> data
     for region_id, node_ids in mapping_devices_area.items():
@@ -63,8 +68,9 @@ def run_simulation(dataset_name: str, number_of_areas: int, device: str, random_
             device_program,
             data=mapping[node.id],
             dataset_name=dataset_name,
-            device = device,
-            seed=seed,
+            device=device,
+            seed=random_seed,
+            target_rnd=common_target_rnd,
         )
 
     RenderMonitor(
