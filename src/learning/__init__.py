@@ -1,4 +1,5 @@
 import math
+import random
 from collections.abc import Sequence
 from typing import Any
 
@@ -12,6 +13,11 @@ from torchvision.transforms import functional as F
 
 DATASET_ROOT = "./data"
 FEATURE_SKEW_RMS = 0.15
+RND_EMBEDDING_DIM = 64
+RND_TARGET_CHANNELS = (32, 64)
+RND_PREDICTOR_CHANNELS = (2, 4)
+RND_SPATIAL_POOL_SIZE = 4
+RND_UNCERTAINTY_REDUCTION = "sum"
 
 __all__ = [
     "DATASET_ROOT",
@@ -19,6 +25,11 @@ __all__ = [
     "FeatureSkewedSubset",
     "PredictorNetwork",
     "RNDModel",
+    "RND_EMBEDDING_DIM",
+    "RND_PREDICTOR_CHANNELS",
+    "RND_SPATIAL_POOL_SIZE",
+    "RND_TARGET_CHANNELS",
+    "RND_UNCERTAINTY_REDUCTION",
     "TargetNetwork",
     "balanced_random_index_split",
     "create_target_rnd",
@@ -132,6 +143,7 @@ def _validate_uncertainty_reduction(uncertainty_reduction: str) -> str:
 
 
 def set_seed(seed: int) -> None:
+    random.seed(seed)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
@@ -376,9 +388,9 @@ class TargetNetwork(nn.Module):
     def __init__(
         self,
         input_channels: int,
-        embedding_dim: int = 64,
-        channels: tuple[int, int] = (16, 32),
-        spatial_pool_size: int = 4,
+        embedding_dim: int = RND_EMBEDDING_DIM,
+        channels: tuple[int, int] = RND_TARGET_CHANNELS,
+        spatial_pool_size: int = RND_SPATIAL_POOL_SIZE,
     ) -> None:
         super().__init__()
         if input_channels <= 0:
@@ -413,9 +425,9 @@ class PredictorNetwork(nn.Module):
     def __init__(
         self,
         input_channels: int,
-        embedding_dim: int = 64,
-        channels: tuple[int, int] = (4, 8),
-        spatial_pool_size: int = 4,
+        embedding_dim: int = RND_EMBEDDING_DIM,
+        channels: tuple[int, int] = RND_PREDICTOR_CHANNELS,
+        spatial_pool_size: int = RND_SPATIAL_POOL_SIZE,
     ) -> None:
         super().__init__()
         if input_channels <= 0:
@@ -451,9 +463,9 @@ class RNDModel(nn.Module):
         self,
         input_channels: int,
         target_network: TargetNetwork,
-        embedding_dim: int = 64,
-        predictor_channels: tuple[int, int] = (4, 8),
-        spatial_pool_size: int = 4,
+        embedding_dim: int = RND_EMBEDDING_DIM,
+        predictor_channels: tuple[int, int] = RND_PREDICTOR_CHANNELS,
+        spatial_pool_size: int = RND_SPATIAL_POOL_SIZE,
     ) -> None:
         super().__init__()
         if target_network.input_channels != input_channels:
@@ -593,9 +605,9 @@ def create_target_rnd(
     dataset: Dataset,
     seed: int,
     device: str | torch.device | None = None,
-    embedding_dim: int = 64,
-    target_channels: tuple[int, int] = (16, 32),
-    spatial_pool_size: int = 4,
+    embedding_dim: int = RND_EMBEDDING_DIM,
+    target_channels: tuple[int, int] = RND_TARGET_CHANNELS,
+    spatial_pool_size: int = RND_SPATIAL_POOL_SIZE,
 ) -> TargetNetwork:
     image_shape = _validate_rnd_dataset(dataset)
     set_seed(seed)
@@ -612,18 +624,28 @@ def create_target_rnd(
     target_network.eval()
     return target_network.to(_resolve_torch_device(device))
 
-def load_rnd_from_weights(w, dataset, target_network, seed):
+def load_rnd_from_weights(
+    w,
+    dataset: Dataset,
+    target_network: TargetNetwork,
+    seed: int = 42,
+    device: str | torch.device | None = None,
+    embedding_dim: int = RND_EMBEDDING_DIM,
+    predictor_channels: tuple[int, int] = RND_PREDICTOR_CHANNELS,
+    spatial_pool_size: int = RND_SPATIAL_POOL_SIZE,
+) -> RNDModel:
     image_shape = _validate_rnd_dataset(dataset)
     set_seed(seed)
     rnd_model = RNDModel(
         input_channels=image_shape[0],
         target_network=target_network,
-        embedding_dim=64,
-        predictor_channels=(4, 8),
-        spatial_pool_size=4,
+        embedding_dim=embedding_dim,
+        predictor_channels=predictor_channels,
+        spatial_pool_size=spatial_pool_size,
     )
     rnd_model.load_state_dict(w)
-    return rnd_model
+    rnd_model.eval()
+    return rnd_model.to(_resolve_torch_device(device))
 
 def train_rnd_on_dataset(
     dataset: Dataset,
@@ -633,9 +655,9 @@ def train_rnd_on_dataset(
     lr: float = 1e-3,
     seed: int = 42,
     device: str | torch.device | None = None,
-    embedding_dim: int = 64,
-    predictor_channels: tuple[int, int] = (4, 8),
-    spatial_pool_size: int = 4,
+    embedding_dim: int = RND_EMBEDDING_DIM,
+    predictor_channels: tuple[int, int] = RND_PREDICTOR_CHANNELS,
+    spatial_pool_size: int = RND_SPATIAL_POOL_SIZE,
 ) -> RNDModel:
     if batch_size <= 0:
         raise ValueError(f"batch_size must be > 0, got {batch_size}.")
@@ -670,7 +692,7 @@ def evaluate_rnd_on_dataset(
     dataset: Dataset,
     batch_size: int = 256,
     device: str | torch.device | None = None,
-    uncertainty_reduction: str = "mean",
+    uncertainty_reduction: str = RND_UNCERTAINTY_REDUCTION,
 ) -> dict[str, Any]:
     if batch_size <= 0:
         raise ValueError(f"batch_size must be > 0, got {batch_size}.")
